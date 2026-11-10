@@ -2,7 +2,8 @@
 """
 Collecte les vidéos YouTube de Solo Leveling: ARISE sur les 3 modes
 (POC = Puissance de Calamité, Boss de Guilde, Battlefield of Time),
-puis classe les chaînes par NOMBRE DE VIDÉOS, sur la SEMAINE EN COURS.
+puis classe les chaînes sur la SEMAINE EN COURS : BOT par chrono, Boss de Guilde
+par Rage Count, POC par dégâts (une ligne par chaîne, sa meilleure vidéo).
 
 La semaine commence chaque jeudi à 01h00 (heure de Paris) et dure 7 jours.
 Seules les vidéos publiées pendant la semaine en cours comptent. Le jeudi à
@@ -317,7 +318,7 @@ def extraire_chrono(titre):
     t = re.sub(SAISON, " ", titre)
     m = re.search(r"(?<![\d.,;A-Za-z])(\d{2,3}(?:[.,;]\d{1,3})?)\s*(?:s\b|sec|秒|초|🕒)", t, re.I)
     if not m:  # sans unité : un nombre à virgule (ex. '29.224 タール')
-        m = re.search(r"(?<![\w.,])(\d{2}[.,]\d{1,3})(?![\w])", t)
+        m = re.search(r"(?<![\w.,])(\d{2}[.,]\d{1,3})(?![\w%])", t)
     if not m:
         return None
     v = float(m.group(1).replace(",", ".").replace(";", "."))
@@ -341,6 +342,18 @@ def _rc_etiquete(texte):
         m = re.search(r"\b(?:rc|rage count)\s*[:=]?\s*(\d{2,3})\b", texte, re.I)
     if m and 50 <= int(m.group(1)) <= 500:
         return int(m.group(1))
+    return None
+
+
+def rc_deux_equipes(texte):
+    """'174 + 178 RC' ou '174+178 Rage Count' : renvoie (equipe_1, equipe_2),
+    sinon None. Sans cela, seul le dernier nombre serait lu (178 au lieu de 352)."""
+    m = re.search(r"(?<![\w.])(\d{2,3})\s*\+\s*(\d{2,3})\s*(?:rc\b|rage count|iras\b)",
+                  texte, re.I)
+    if m:
+        a, b = int(m.group(1)), int(m.group(2))
+        if 20 <= a <= 300 and 20 <= b <= 300:
+            return a, b
     return None
 
 
@@ -419,7 +432,11 @@ def lire_valeurs(titre, desc, liste, vid=None, claude=None):
                 out["bot"] = (v, None, v, "description")
     if "boss_guilde" in liste and "gb" not in out:
         r = extraire_rc(titre)
-        if r is not None:
+        deux = rc_deux_equipes(titre) or rc_deux_equipes(desc)
+        if deux:
+            out["gb"] = (deux[0], deux[1], deux[0] + deux[1],
+                         "titre" if rc_deux_equipes(titre) else "description")
+        elif r is not None:
             out["gb"] = (r[0], None, r[0], r[1])
         else:
             v = rc_description(desc)
@@ -468,6 +485,12 @@ def importer_fichier_claude(db, chemin):
             passe = 2 if int((r.get("passe") or 1)) >= 2 else 1
         except ValueError:
             passe = 1
+        ancien = db.execute("SELECT passe FROM valeurs_claude WHERE video_id=? AND mode=?",
+                            (vid, mode)).fetchone()
+        if ancien and (ancien[0] or 1) >= 2 and passe < 2:
+            print(f"  {vid} ({mode}) : ligne de la miniature ignorée, "
+                  "la valeur lue en vidéo est gardée.")
+            continue
         db.execute("INSERT OR REPLACE INTO valeurs_claude "
                    "(video_id, mode, valeur, remarque, passe, valeur2, total) "
                    "VALUES (?,?,?,?,?,?,?)",
