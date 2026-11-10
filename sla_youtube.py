@@ -21,8 +21,10 @@ Aucun appel à Claude : le script ne consomme pas ta limite.
 
 Vidéos sans chiffre lisible : elles sont mises de côté dans a_identifier.csv
 (avec leurs miniatures dans le dossier "miniatures"). Claude les identifie et
-rend resultats_claude.csv : à placer dans ce dossier, le script l'importe au
-lancement suivant.
+rend un fichier resultats_claude*.csv (resultats_claude.csv ou seulement un
+fichier d'ajout) : à placer dans ce dossier, le script l'importe au lancement
+suivant, le garde en mémoire (sla_videos.sqlite) et le range dans
+resultats_importes. Inutile de redonner le fichier complet à Claude.
 
 Vidéos illisibles sur miniature (valeur vide) : rangées à part, toutes semaines
 confondues, dans a_revoir.csv, en attente d'une identification en regardant la
@@ -433,8 +435,8 @@ def lire_valeurs(titre, desc, liste, vid=None, claude=None):
     return out
 
 
-def importer_resultats_claude(db, chemin="resultats_claude.csv"):
-    """Lit resultats_claude.csv (colonnes : id_video;mode;valeur;remarque),
+def importer_fichier_claude(db, chemin):
+    """Lit un fichier de résultats de Claude (colonnes : id_video;mode;valeur;remarque),
     rempli par Claude, et l'ajoute à la mémoire du script. Sans effet si le
     fichier n'existe pas. mode = bot, gb ou poc ; valeur vide = illisible.
     Colonnes facultatives :
@@ -472,6 +474,34 @@ def importer_resultats_claude(db, chemin="resultats_claude.csv"):
         n += 1
     db.commit()
     return n
+
+
+def importer_resultats_claude(db, dossier="."):
+    """Importe TOUS les fichiers resultats_claude*.csv du dossier (par ex.
+    resultats_claude.csv, resultats_claude_ajout.csv), du plus ancien au plus
+    récent : en cas de doublon, le plus récent l'emporte. Les valeurs sont
+    gardées dans sla_videos.sqlite : il n'est donc plus nécessaire de
+    redonner le fichier complet à Claude, un fichier d'ajout (seulement les
+    nouvelles lignes) suffit. Chaque fichier importé est rangé ensuite dans le
+    dossier resultats_importes (copie de sauvegarde, jamais réimporté)."""
+    fichiers = sorted(
+        (f for f in os.listdir(dossier)
+         if re.fullmatch(r"resultats_claude.*\.csv", f, re.IGNORECASE)),
+        key=lambda f: os.path.getmtime(os.path.join(dossier, f)))
+    total = 0
+    for nom in fichiers:
+        chemin = os.path.join(dossier, nom)
+        n = importer_fichier_claude(db, chemin)
+        total += n
+        try:
+            rangement = os.path.join(dossier, "resultats_importes")
+            os.makedirs(rangement, exist_ok=True)
+            horodatage = datetime.now().strftime("%Y%m%d_%H%M%S")
+            shutil.move(chemin, os.path.join(rangement, f"{horodatage}_{nom}"))
+        except OSError as e:
+            print(f"Import de {nom} fait, mais impossible de le ranger : {e}")
+        print(f"{nom} : {n} lignes importées")
+    return total
 
 
 def exporter_a_revoir(db, chemin="a_revoir.csv"):
