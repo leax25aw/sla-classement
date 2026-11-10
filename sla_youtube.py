@@ -399,9 +399,17 @@ def lire_valeurs(titre, desc, liste, vid=None, claude=None):
     Pour le POC et le Boss de Guilde, un nombre lu dans un titre ou une
     description est le score d'UNE équipe, sauf si le mot « total » l'accompagne
     (POC) : il compte alors comme le total, sans détail par équipe.
-    Les valeurs identifiées par Claude ne servent qu'en dernier recours."""
+    Les valeurs lues par Claude (miniature ou images de la vidéo) passent AVANT le titre
+    et la description : elles viennent de l'écran du jeu, donc plus précises (par exemple
+    32,833 s au lieu de « 32 s » écrit dans une description)."""
     out = {}
-    if "battlefield_of_time" in liste:
+    for cle in ("bot", "gb", "poc"):
+        if claude and (vid, cle) in claude:
+            e1, e2, tot = claude[(vid, cle)]
+            if tot is None:
+                tot = somme(e1, e2)
+            out[cle] = (e1, e2, tot, "claude")
+    if "battlefield_of_time" in liste and "bot" not in out:
         v = extraire_chrono(titre)
         if v is not None:
             out["bot"] = (v, None, v, "titre")
@@ -409,7 +417,7 @@ def lire_valeurs(titre, desc, liste, vid=None, claude=None):
             v = chrono_description(desc)
             if v is not None:
                 out["bot"] = (v, None, v, "description")
-    if "boss_guilde" in liste:
+    if "boss_guilde" in liste and "gb" not in out:
         r = extraire_rc(titre)
         if r is not None:
             out["gb"] = (r[0], None, r[0], r[1])
@@ -417,7 +425,7 @@ def lire_valeurs(titre, desc, liste, vid=None, claude=None):
             v = rc_description(desc)
             if v is not None:
                 out["gb"] = (v, None, v, "description")
-    if "poc" in liste:
+    if "poc" in liste and "poc" not in out:
         for texte, strict, src in ((titre, False, "titre"), (desc, True, "description")):
             v = extraire_degats(texte, strict=strict)
             if v is not None:
@@ -426,12 +434,6 @@ def lire_valeurs(titre, desc, liste, vid=None, claude=None):
                 else:
                     out["poc"] = (v, None, v, src)
                 break
-    for cle in ("bot", "gb", "poc"):
-        if cle not in out and claude and (vid, cle) in claude:
-            e1, e2, tot = claude[(vid, cle)]
-            if tot is None:
-                tot = somme(e1, e2)
-            out[cle] = (e1, e2, tot, "claude")
     return out
 
 
