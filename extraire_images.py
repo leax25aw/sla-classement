@@ -16,7 +16,8 @@ Installation (une seule fois, sous Windows) :
 Utilisation, dans le dossier SLA, après avoir lancé sla_youtube.py :
     py extraire_images.py              # traite 5 vidéos à revoir
     py extraire_images.py --max 10     # traite 10 vidéos
-    py extraire_images.py --video ID   # une vidéo précise (son identifiant)
+    py extraire_images.py --video ID   # une vidéo à revoir précise (son identifiant)
+    py extraire_images.py --video ID1 ID2 --mode gb   # vidéos DÉJÀ classées, à relire (ex. dégâts)
     py extraire_images.py --secondes 30  # 30 s au début et à la fin (10 par défaut)
     py extraire_images.py --refaire    # refait aussi les vidéos déjà extraites
     py extraire_images.py --ajouter    # garde le contenu de a_envoyer et le complète
@@ -231,10 +232,22 @@ def telecharger(vid, regles, duree_s, reglages, tmp):
     return fichiers
 
 
-def videos_a_revoir(video_id=None):
+def videos_a_revoir(video_ids=None, mode=None):
+    """Vidéos à traiter. Par défaut : celles de a_revoir.csv. Avec --video et --mode :
+    les vidéos données, même déjà classées (ex. relire les dégâts d'une vidéo)."""
     if not Path(DB).exists():
         sys.exit(f"{DB} introuvable : lance d'abord sla_youtube.py dans ce dossier.")
     db = sqlite3.connect(DB)
+    groupes = {}
+    if video_ids and mode:  # vidéos choisies à la main, quel que soit leur statut
+        for vid in video_ids:
+            r = db.execute("SELECT id, channel, title, duration_s FROM videos WHERE id = ?",
+                           (vid,)).fetchone()
+            if r is None:
+                print(f"Vidéo {vid} inconnue de {DB} : lance sla_youtube.py puis réessaie.")
+                continue
+            groupes[vid] = {"modes": [mode], "chaine": r[1], "titre": r[2], "duree": r[3]}
+        return groupes
     try:
         lignes = db.execute(
             "SELECT v.video_id, v.mode, i.channel, i.title, i.duration_s "
@@ -243,13 +256,12 @@ def videos_a_revoir(video_id=None):
             "ORDER BY i.published DESC").fetchall()
     except sqlite3.OperationalError:
         sys.exit("Mets d'abord à jour sla_youtube.py et relance-le une fois.")
-    groupes = {}
-    for vid, mode, chaine, titre, duree in lignes:
-        if video_id and vid != video_id:
+    for vid, mode_v, chaine, titre, duree in lignes:
+        if video_ids and vid not in video_ids:
             continue
         g = groupes.setdefault(vid, {"modes": [], "chaine": chaine, "titre": titre,
                                      "duree": duree})
-        g["modes"].append(mode)
+        g["modes"].append(mode_v)
     return groupes
 
 
@@ -305,7 +317,7 @@ def traiter(vid, modes, fichiers, reglages, sortie, envoi=None):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--max", type=int, default=5, help="nombre de vidéos par lancement")
-    p.add_argument("--video", help="identifiant d'une vidéo précise")
+    p.add_argument("--video", nargs="+", help="identifiant(s) de vidéo ; avec --mode, même si déjà classée")
     p.add_argument("--refaire", action="store_true")
     p.add_argument("--ajouter", action="store_true",
                    help="garder le contenu actuel de a_envoyer et le compléter")
@@ -313,7 +325,7 @@ def main():
     p.add_argument("--secondes", type=int, default=DUREE_DEFAUT,
                    help="secondes prises au début ET à la fin de la vidéo (10 par défaut)")
     p.add_argument("--fichier", help="vidéo locale (test des réglages)")
-    p.add_argument("--mode", choices=["bot", "gb", "poc"], help="mode, avec --fichier")
+    p.add_argument("--mode", choices=["bot", "gb", "poc"], help="mode, avec --fichier ou --video")
     a = p.parse_args()
     reglages = charger_reglages()
     appliquer_duree(reglages, a.secondes)
@@ -328,7 +340,7 @@ def main():
         print(lignes[0][7])
         return
 
-    groupes = videos_a_revoir(a.video)
+    groupes = videos_a_revoir(a.video, a.mode)
     if not groupes:
         print("Aucune vidéo à revoir pour le moment.")
         return
