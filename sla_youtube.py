@@ -141,8 +141,10 @@ def init_db():
         db.execute("ALTER TABLE valeurs_claude ADD COLUMN passe INTEGER DEFAULT 1")
         db.commit()
     # valeur = 1re équipe de la vidéo ; valeur2 = 2e équipe ; total = leur somme.
+    # degats = dégâts totaux en T (Boss de Guilde) : sert à départager deux chaînes
+    # à égalité de Rage Count.
     # Migration silencieuse des anciennes bases.
-    for col in ("valeur2", "total"):
+    for col in ("valeur2", "total", "degats"):
         if col not in colonnes:
             db.execute(f"ALTER TABLE valeurs_claude ADD COLUMN {col} REAL")
     db.commit()
@@ -461,7 +463,8 @@ def importer_fichier_claude(db, chemin):
     Colonnes facultatives :
       valeur2 : score de la 2e équipe, si la vidéo en montre deux (POC, Boss de Guilde)
       total   : total des deux équipes (sinon calculé : valeur + valeur2)
-      passe   : 1 = miniature (défaut), 2 = vidéo regardée."""
+      passe   : 1 = miniature (défaut), 2 = vidéo regardée.
+      degats  : dégâts totaux en T (Boss de Guilde), pour départager des égalités de RC."""
     if not os.path.exists(chemin):
         return 0
     with open(chemin, newline="", encoding="utf-8-sig") as f:
@@ -479,23 +482,26 @@ def importer_fichier_claude(db, chemin):
             except ValueError:
                 return None
         valeur, valeur2, total = nombre("valeur"), nombre("valeur2"), nombre("total")
+        degats = nombre("degats")
         if total is None and (valeur is not None or valeur2 is not None):
             total = somme(valeur, valeur2)
         try:
             passe = 2 if int((r.get("passe") or 1)) >= 2 else 1
         except ValueError:
             passe = 1
-        ancien = db.execute("SELECT passe FROM valeurs_claude WHERE video_id=? AND mode=?",
+        ancien = db.execute("SELECT passe, degats FROM valeurs_claude WHERE video_id=? AND mode=?",
                             (vid, mode)).fetchone()
+        if degats is None and ancien:
+            degats = ancien[1]  # une ligne sans dégâts n'efface pas ceux déjà connus
         if ancien and (ancien[0] or 1) >= 2 and passe < 2:
             print(f"  {vid} ({mode}) : ligne de la miniature ignorée, "
                   "la valeur lue en vidéo est gardée.")
             continue
         db.execute("INSERT OR REPLACE INTO valeurs_claude "
-                   "(video_id, mode, valeur, remarque, passe, valeur2, total) "
-                   "VALUES (?,?,?,?,?,?,?)",
+                   "(video_id, mode, valeur, remarque, passe, valeur2, total, degats) "
+                   "VALUES (?,?,?,?,?,?,?,?)",
                    (vid, mode, valeur, (r.get("remarque") or "").strip(), passe,
-                    valeur2, total))
+                    valeur2, total, degats))
         n += 1
     db.commit()
     return n
@@ -594,6 +600,10 @@ def exporter(db, debut_utc, fin_utc, jour):
     claude = {(v, m): (e1, e2, tot) for v, m, e1, e2, tot in db.execute(
         "SELECT video_id, mode, valeur, valeur2, total FROM valeurs_claude "
         "WHERE valeur IS NOT NULL OR total IS NOT NULL")}
+    # Dégâts totaux connus (Boss de Guilde) : départagent les égalités de RC.
+    degats_gb = {v: d for v, d in db.execute(
+        "SELECT video_id, degats FROM valeurs_claude "
+        "WHERE mode='gb' AND degats IS NOT NULL")}
     traites = {(v, m) for v, m in db.execute(
         "SELECT video_id, mode FROM valeurs_claude")}
     a_identifier = []
@@ -617,7 +627,8 @@ def exporter(db, debut_utc, fin_utc, jour):
             if tot is None:
                 continue
             # BOT : plus petit = meilleur ; GB et POC : plus grand total = meilleur
-            clef = tot if cle == "bot" else -tot
+            # À égalité de RC : plus de dégâts d'abord, puis la vidéo publiée en premier.
+            clef = (tot, 0) if cle == "bot" else (-tot, -(degats_gb.get(vid) or 0) if cle == "gb" else 0)
             actuel = best[cle].get(cid)
             if actuel is None or (clef, pub) < (actuel[0], actuel[1]):
                 best[cle][cid] = (clef, pub, e1, e2, tot, chaine, titre, url, src)
