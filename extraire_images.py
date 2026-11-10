@@ -19,14 +19,20 @@ Utilisation, dans le dossier SLA, après avoir lancé sla_youtube.py :
     py extraire_images.py --video ID   # une vidéo précise (son identifiant)
     py extraire_images.py --secondes 30  # 30 s au début et à la fin (10 par défaut)
     py extraire_images.py --refaire    # refait aussi les vidéos déjà extraites
+    py extraire_images.py --ajouter    # garde le contenu de a_envoyer et le complète
 
 Tester les réglages sur une vidéo déjà présente sur ton ordinateur :
     py extraire_images.py --fichier ma_video.mp4 --mode bot
 
-Résultat : un dossier images_a_revoir\\<id_video>\\ avec les planches, et
-images_a_revoir\\liste.csv qui dit quoi chercher et dans quel ordre sont les
-images de chaque planche. Envoie ces planches à Claude : il rend
-resultats_claude.csv avec la colonne passe = 2.
+Résultat : un dossier « a_envoyer » qui contient UNIQUEMENT ce qu'il faut
+envoyer à Claude pour ce lancement : les planches (nommées
+<id_video>_<mode>_planche_01.jpg, donc impossibles à confondre) et liste.csv
+(quoi chercher et dans quel ordre sont les images de chaque planche). Envoie à
+Claude TOUT le contenu de ce dossier : il rend un fichier d'ajout
+resultats_claude_ajout.csv avec la colonne passe = 2.
+Au lancement suivant, le contenu précédent de « a_envoyer » est rangé dans
+images_a_revoir\\archives\\<date>\\ (--ajouter pour le garder et compléter).
+Les planches restent aussi dans images_a_revoir\\<id_video>\\.
 
 Réglages : le fichier reglages_images.json (créé au premier lancement).
 Attention : YouTube interdit en général le téléchargement de ses vidéos en
@@ -41,10 +47,13 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 DB = "sla_videos.sqlite"
 DOSSIER = Path("images_a_revoir")
+ENVOI = Path("a_envoyer")                 # ce qu'on envoie à Claude
+ARCHIVES = DOSSIER / "archives"           # anciens contenus de a_envoyer
 REGLAGES = Path("reglages_images.json")
 
 QUOI = {"bot": "chrono en secondes", "gb": "Rage Count (RC)",
@@ -244,9 +253,21 @@ def videos_a_revoir(video_id=None):
     return groupes
 
 
+def preparer_envoi(ajouter=False):
+    """Prépare le dossier a_envoyer. Sauf avec --ajouter, son contenu précédent
+    est rangé dans images_a_revoir\\archives\\<date> (rien n'est supprimé)."""
+    ENVOI.mkdir(exist_ok=True)
+    anciens = [f for f in ENVOI.iterdir() if f.is_file()]
+    if anciens and not ajouter:
+        dest = ARCHIVES / datetime.now().strftime("%Y%m%d_%H%M%S")
+        dest.mkdir(parents=True, exist_ok=True)
+        for f in anciens:
+            shutil.move(str(f), str(dest / f.name))
+
+
 def ecrire_liste(lignes):
-    DOSSIER.mkdir(exist_ok=True)
-    chemin = DOSSIER / "liste.csv"
+    ENVOI.mkdir(exist_ok=True)
+    chemin = ENVOI / "liste.csv"
     nouveau = not chemin.exists()
     with open(chemin, "a", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f, delimiter=";")
@@ -256,7 +277,7 @@ def ecrire_liste(lignes):
         w.writerows(lignes)
 
 
-def traiter(vid, modes, fichiers, reglages, sortie):
+def traiter(vid, modes, fichiers, reglages, sortie, envoi=None):
     """Une planche par jeu de réglages distinct (3 modes identiques = 1 seul jeu)."""
     sortie.mkdir(parents=True, exist_ok=True)
     deja, lignes = {}, []
@@ -265,14 +286,19 @@ def traiter(vid, modes, fichiers, reglages, sortie):
         cle = json.dumps([r["segments"], r["pas_s"], r["zone"]])
         if cle not in deja:
             prefixe = mode if len(deja) == 0 else f"{mode}_{len(deja) + 1}"
+            prefixe = f"{vid}_{prefixe}"  # l'identifiant de la vidéo dans chaque nom
             tmp_cadres = sortie / f"_cadres_{prefixe}"
             cadres = extraire_cadres(fichiers, r, reglages["planche"]["largeur_tuile"],
                                      tmp_cadres)
             planches, ordre = faire_planches(cadres, reglages["planche"], sortie, prefixe)
             shutil.rmtree(tmp_cadres, ignore_errors=True)
+            if envoi is not None:  # copie dans a_envoyer (noms uniques)
+                for f in planches:
+                    shutil.copy2(f, envoi / f.name)
             deja[cle] = (planches, ordre)
         planches, ordre = deja[cle]
-        lignes.append([vid, mode, QUOI[mode], "", "", str(sortie), len(planches), ordre])
+        lignes.append([vid, mode, QUOI[mode], "", "",
+                       str(envoi if envoi is not None else sortie), len(planches), ordre])
     return lignes
 
 
@@ -281,6 +307,8 @@ def main():
     p.add_argument("--max", type=int, default=5, help="nombre de vidéos par lancement")
     p.add_argument("--video", help="identifiant d'une vidéo précise")
     p.add_argument("--refaire", action="store_true")
+    p.add_argument("--ajouter", action="store_true",
+                   help="garder le contenu actuel de a_envoyer et le compléter")
     p.add_argument("--garder", action="store_true", help="ne pas supprimer les morceaux téléchargés")
     p.add_argument("--secondes", type=int, default=DUREE_DEFAUT,
                    help="secondes prises au début ET à la fin de la vidéo (10 par défaut)")
@@ -306,6 +334,7 @@ def main():
         return
     DOSSIER.mkdir(exist_ok=True)
     traitees = 0
+    envoi_pret = False  # a_envoyer n'est vidé qu'à la 1re vidéo réellement traitée
     for vid, g in groupes.items():
         if traitees >= a.max:
             print(f"Limite de {a.max} vidéos atteinte, relance pour continuer.")
@@ -318,7 +347,12 @@ def main():
         try:
             fichiers = telecharger(vid, [reglages[m] for m in g["modes"]],
                                    g["duree"], reglages, tmp)
-            lignes = traiter(vid, g["modes"], fichiers, reglages, sortie)
+            if a.refaire:  # évite de garder d'anciennes planches mal nommées
+                shutil.rmtree(sortie, ignore_errors=True)
+            if not envoi_pret:
+                preparer_envoi(a.ajouter)
+                envoi_pret = True
+            lignes = traiter(vid, g["modes"], fichiers, reglages, sortie, ENVOI)
             for l in lignes:
                 l[3], l[4] = g["chaine"], g["titre"]
                 print(f"    {l[1]} : {l[6]} planche(s)")
@@ -329,8 +363,12 @@ def main():
         finally:
             if not a.garder:
                 shutil.rmtree(tmp, ignore_errors=True)
-    print(f"\n{traitees} vidéos traitées. Envoie à Claude les planches du dossier "
-          f"{DOSSIER}\\<id_video> avec {DOSSIER}\\liste.csv.")
+    if traitees:
+        print(f"\n{traitees} vidéos traitées. Envoie à Claude TOUT le contenu du dossier "
+              f"{ENVOI} (planches + liste.csv), rien d'autre.")
+    else:
+        print("\nRien de nouveau à envoyer (vidéos déjà extraites : --refaire pour "
+              f"les refaire). Le dossier {ENVOI} n'a pas été modifié.")
 
 
 if __name__ == "__main__":
