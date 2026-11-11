@@ -19,8 +19,21 @@ Utilisation, dans le dossier SLA, après avoir lancé sla_youtube.py :
     py extraire_images.py --video ID   # une vidéo à revoir précise (son identifiant)
     py extraire_images.py --video ID1 ID2 --mode gb   # vidéos DÉJÀ classées, à relire (ex. dégâts)
     py extraire_images.py --secondes 30  # 30 s au début et à la fin (10 par défaut)
+    py extraire_images.py --video ID --mode gb --toute   # TOUTE la vidéo (le score peut s'afficher n'importe quand)
+    py extraire_images.py --video ID --mode poc --toute --pas 6   # une image toutes les 6 s (10 par défaut)
     py extraire_images.py --refaire    # refait aussi les vidéos déjà extraites
     py extraire_images.py --ajouter    # garde le contenu de a_envoyer et le complète
+
+Option --toute (avec --video et --mode, ou --fichier) : pour les vidéos dont le
+score peut apparaître à n'importe quel moment (titre annonçant deux éléments,
+écran de résultat absent du début et de la fin). Le script télécharge TOUTE la
+vidéo (qualité limitée, sans son), prend une image toutes les --pas secondes
+(10 par défaut) et les range en planches nommées
+<id_video>_<mode>_toute_planche_NN.jpg ; l'instant de chaque image est écrit
+sous la forme minutes:secondes dans liste.csv. Au plus --max-images images
+(180 par défaut) : au-delà, le pas est augmenté automatiquement et le script le
+dit. Compter 6 images par planche : une vidéo de 10 minutes au pas de 10 s donne
+10 planches.
 
 Tester les réglages sur une vidéo déjà présente sur ton ordinateur :
     py extraire_images.py --fichier ma_video.mp4 --mode bot
@@ -42,8 +55,10 @@ basse qualité, et SUPPRIME les morceaux après avoir gardé les images
 (--garder pour l'éviter).
 """
 import argparse
+import copy
 import csv
 import json
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -135,6 +150,31 @@ def instants(segment, pas):
     return liste
 
 
+def duree_fichier(source):
+    """Durée (secondes) d'un fichier vidéo, lue avec ffmpeg ; None si introuvable."""
+    r = subprocess.run([ffmpeg_exe(), "-i", str(source)], capture_output=True, text=True)
+    m = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", r.stderr or "")
+    if not m:
+        return None
+    return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
+
+
+def reglages_toute(reglages, modes, duree, pas, max_images):
+    """Copie des réglages pour la vidéo ENTIÈRE : une image toutes les « pas »
+    secondes, de 0 à la fin, sans dépasser max_images images (le pas est alors
+    augmenté). Renvoie (reglages, pas_utilise)."""
+    pas = max(1, int(pas))
+    fin = max(0, int(duree) - 1)
+    if max_images and fin // pas + 1 > max_images:
+        pas = -(-fin // max(1, max_images - 1))
+        print(f"    vidéo longue : pas porté à {pas} s pour rester sous {max_images} images")
+    neuf = copy.deepcopy(reglages)
+    for mode in modes:
+        neuf[mode] = {"segments": [["debut", 0, fin]], "pas_s": pas, "zone": None,
+                      "toute": True}
+    return neuf, pas
+
+
 def filtre_video(zone, largeur):
     morceaux = []
     if zone:
@@ -159,6 +199,8 @@ def extraire_cadres(fichiers, regle, largeur, dossier):
         for t in instants(seg, regle["pas_s"]):
             if repere == "fin":
                 pos, desc = ["-sseof", f"-{max(t, 0.5)}"], f"fin -{int(t)}s"
+            elif regle.get("toute"):
+                pos, desc = ["-ss", str(t)], f"{int(t) // 60}:{int(t) % 60:02d}"
             else:
                 pos, desc = ["-ss", str(t)], f"début {int(t)}s"
             n += 1
@@ -212,11 +254,13 @@ def _yt(vid, nom, tmp, qualite, section=None):
     return fichiers[0]
 
 
-def telecharger(vid, regles, duree_s, reglages, tmp):
+def telecharger(vid, regles, duree_s, reglages, tmp, toute=False):
     """Télécharge seulement les morceaux utiles (vidéo sans son, qualité limitée).
     Renvoie un dict {"debut": fichier, "fin": fichier} ou {"tout": fichier}."""
     tmp.mkdir(parents=True, exist_ok=True)
     qualite = int(reglages["qualite_telechargement_max"])
+    if toute:  # vidéo entière
+        return {"tout": _yt(vid, "tout", tmp, qualite)}
     segs = [s for r in regles for s in r["segments"]]
     besoin_fin = max([s[1] for s in segs if s[0] == "fin"], default=None)
     besoin_debut = max([s[2] for s in segs if s[0] == "debut"], default=None)
@@ -289,7 +333,7 @@ def ecrire_liste(lignes):
         w.writerows(lignes)
 
 
-def traiter(vid, modes, fichiers, reglages, sortie, envoi=None):
+def traiter(vid, modes, fichiers, reglages, sortie, envoi=None, suffixe=""):
     """Une planche par jeu de réglages distinct (3 modes identiques = 1 seul jeu)."""
     sortie.mkdir(parents=True, exist_ok=True)
     deja, lignes = {}, []
@@ -298,7 +342,7 @@ def traiter(vid, modes, fichiers, reglages, sortie, envoi=None):
         cle = json.dumps([r["segments"], r["pas_s"], r["zone"]])
         if cle not in deja:
             prefixe = mode if len(deja) == 0 else f"{mode}_{len(deja) + 1}"
-            prefixe = f"{vid}_{prefixe}"  # l'identifiant de la vidéo dans chaque nom
+            prefixe = f"{vid}_{prefixe}{suffixe}"  # l'identifiant de la vidéo dans chaque nom
             tmp_cadres = sortie / f"_cadres_{prefixe}"
             cadres = extraire_cadres(fichiers, r, reglages["planche"]["largeur_tuile"],
                                      tmp_cadres)
@@ -324,6 +368,12 @@ def main():
     p.add_argument("--garder", action="store_true", help="ne pas supprimer les morceaux téléchargés")
     p.add_argument("--secondes", type=int, default=DUREE_DEFAUT,
                    help="secondes prises au début ET à la fin de la vidéo (10 par défaut)")
+    p.add_argument("--toute", action="store_true",
+                   help="images sur TOUTE la vidéo (avec --video et --mode, ou --fichier)")
+    p.add_argument("--pas", type=int, default=10,
+                   help="avec --toute : une image toutes les X secondes (10 par défaut)")
+    p.add_argument("--max-images", type=int, default=180,
+                   help="avec --toute : nombre maximal d'images par vidéo (180 par défaut)")
     p.add_argument("--fichier", help="vidéo locale (test des réglages)")
     p.add_argument("--mode", choices=["bot", "gb", "poc"], help="mode, avec --fichier ou --video")
     a = p.parse_args()
@@ -335,11 +385,21 @@ def main():
             sys.exit("Ajoute --mode bot, gb ou poc.")
         sortie = DOSSIER / "test"
         shutil.rmtree(sortie, ignore_errors=True)
-        lignes = traiter("test", [a.mode], {"tout": Path(a.fichier)}, reglages, sortie)
+        suffixe = ""
+        if a.toute:
+            d = duree_fichier(a.fichier)
+            if not d:
+                sys.exit("Durée du fichier illisible.")
+            reglages, _ = reglages_toute(reglages, [a.mode], d, a.pas, a.max_images)
+            suffixe = "_toute"
+        lignes = traiter("test", [a.mode], {"tout": Path(a.fichier)}, reglages, sortie,
+                         suffixe=suffixe)
         print(f"{lignes[0][6]} planches dans {sortie}")
         print(lignes[0][7])
         return
 
+    if a.toute and not (a.video and a.mode):
+        sys.exit("--toute s'utilise avec --video ID et --mode bot, gb ou poc.")
     groupes = videos_a_revoir(a.video, a.mode)
     if not groupes:
         print("Aucune vidéo à revoir pour le moment.")
@@ -351,20 +411,29 @@ def main():
         if traitees >= a.max:
             print(f"Limite de {a.max} vidéos atteinte, relance pour continuer.")
             break
-        sortie = DOSSIER / vid
+        sortie = DOSSIER / (f"{vid}_toute" if a.toute else vid)  # dossier à part pour --toute
         if sortie.exists() and any(sortie.glob("*.jpg")) and not a.refaire:
             continue
         print(f"[{traitees + 1}] {g['chaine']} — {g['titre'][:60]}")
         tmp = DOSSIER / f"_tmp_{vid}"
         try:
             fichiers = telecharger(vid, [reglages[m] for m in g["modes"]],
-                                   g["duree"], reglages, tmp)
+                                   g["duree"], reglages, tmp, toute=a.toute)
+            reglages_v, suffixe = reglages, ""
+            if a.toute:
+                d = duree_fichier(fichiers["tout"]) or g["duree"]
+                if not d:
+                    raise RuntimeError("durée de la vidéo introuvable")
+                reglages_v, pas = reglages_toute(reglages, g["modes"], d, a.pas, a.max_images)
+                suffixe = "_toute"
+                print(f"    vidéo entière : {int(d) // 60} min {int(d) % 60} s, une image toutes les {pas} s")
             if a.refaire:  # évite de garder d'anciennes planches mal nommées
                 shutil.rmtree(sortie, ignore_errors=True)
             if not envoi_pret:
                 preparer_envoi(a.ajouter)
                 envoi_pret = True
-            lignes = traiter(vid, g["modes"], fichiers, reglages, sortie, ENVOI)
+            lignes = traiter(vid, g["modes"], fichiers, reglages_v, sortie, ENVOI,
+                             suffixe=suffixe)
             for l in lignes:
                 l[3], l[4] = g["chaine"], g["titre"]
                 print(f"    {l[1]} : {l[6]} planche(s)")
