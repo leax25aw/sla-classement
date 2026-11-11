@@ -14,6 +14,10 @@ Utilisation (Windows) :
     set YOUTUBE_API_KEY=ta_clé
     py sla_youtube.py            # met à jour le classement de la semaine
     py sla_youtube.py --refaire  # refait la recherche depuis le début de la semaine
+    py sla_youtube.py --local    # SANS YouTube (0 unité de quota) : importe les fichiers
+                                 # resultats_claude*.csv et refait les classements à partir
+                                 # de sla_videos.sqlite. Ne cherche pas les nouvelles vidéos :
+                                 # pour cela, lancer sans --local (1 ou 2 fois par jour).
 
 Résultats (semaine en cours) : classement_poc.csv (par dégâts), classement_bot.csv
 (par chrono), classement_gb.csv (par Rage Count), chaines.csv (par nombre de
@@ -722,12 +726,18 @@ def exporter(db, debut_utc, fin_utc, jour):
 
 
 def main():
-    if not KEY:
-        sys.exit("Définis la variable d'environnement YOUTUBE_API_KEY.")
     parser = argparse.ArgumentParser()
     parser.add_argument("--refaire", action="store_true",
                         help="refait la recherche depuis le début de la semaine")
+    parser.add_argument("--local", action="store_true",
+                        help="n'appelle pas YouTube (0 unité de quota) : importe les fichiers "
+                             "resultats_claude*.csv et refait les classements")
     args = parser.parse_args()
+    if args.local and args.refaire:
+        parser.error("--local et --refaire ne vont pas ensemble (--refaire relance la recherche).")
+    if not KEY and not args.local:
+        sys.exit("Définis la variable d'environnement YOUTUBE_API_KEY "
+                 "(ou lance avec --local pour ne pas appeler YouTube).")
 
     db = init_db()
     now = maintenant_local()
@@ -744,22 +754,38 @@ def main():
     since = iso_utc(since_dt)
 
     ids, nb, complet = set(), 0, True
-    try:
-        chercher(since, ids, db, args.refaire)
-    except LimiteAPI as e:
-        complet = False
-        print(f"\nATTENTION : {e}. La recherche s'arrête ici ({len(ids)} vidéos trouvées).")
-    try:
-        nb = details(db, ids)
-    except LimiteAPI as e:
-        complet = False
-        print(f"\nATTENTION : {e}. Les détails de certaines vidéos manquent.")
-    recalculer_modes(db)
-    try:
-        rafraichir_vues(db, debut_utc, fin_utc)
-    except LimiteAPI:
-        print("Les vues n'ont pas pu être mises à jour cette fois.")
-    if complet:
+    if args.local:
+        # Aucun appel à YouTube : on travaille sur ce qui est déjà dans sla_videos.sqlite.
+        if db.execute("SELECT COUNT(*) FROM videos").fetchone()[0] == 0:
+            sys.exit("sla_videos.sqlite ne contient encore aucune vidéo : lance d'abord "
+                     "py sla_youtube.py (sans --local).")
+        print("Mode local : YouTube n'est pas appelé (0 unité de quota). Les nouvelles vidéos "
+              "ne sont pas cherchées : lance py sla_youtube.py (sans --local) pour cela.")
+        if not derniere or datetime.fromisoformat(derniere[0]) < debut:
+            print("ATTENTION : aucun lancement complet depuis le début de cette semaine "
+                  f"({debut:%d/%m/%Y %Hh%M}) : les classements restent vides ou incomplets "
+                  "tant que py sla_youtube.py n'a pas été lancé sans --local.")
+        recalculer_modes(db)
+        complet = False  # pas de recherche faite : on ne touche pas à la date du dernier lancement
+    else:
+        try:
+            chercher(since, ids, db, args.refaire)
+        except LimiteAPI as e:
+            complet = False
+            print(f"\nATTENTION : {e}. La recherche s'arrête ici ({len(ids)} vidéos trouvées).")
+        try:
+            nb = details(db, ids)
+        except LimiteAPI as e:
+            complet = False
+            print(f"\nATTENTION : {e}. Les détails de certaines vidéos manquent.")
+        recalculer_modes(db)
+        try:
+            rafraichir_vues(db, debut_utc, fin_utc)
+        except LimiteAPI:
+            print("Les vues n'ont pas pu être mises à jour cette fois.")
+    if args.local:
+        pass
+    elif complet:
         db.execute("INSERT OR REPLACE INTO meta VALUES ('last_run', ?)",
                    (datetime.now(timezone.utc).isoformat(),))
         db.execute("DELETE FROM meta WHERE k LIKE 'done:%'")
@@ -773,7 +799,10 @@ def main():
     telecharger_miniatures({ligne[0] for ligne in a_identifier})
     n_revoir, n_revoir_total = exporter_a_revoir(db)
     print(f"Semaine du {debut:%d/%m/%Y %Hh%M} au {fin:%d/%m/%Y %Hh%M} (heure de Paris)")
-    print(f"{len(ids)} vidéos trouvées, {nb} nouvelles analysées.")
+    if args.local:
+        print("Mode local : aucune recherche YouTube (0 unité de quota utilisée).")
+    else:
+        print(f"{len(ids)} vidéos trouvées, {nb} nouvelles analysées.")
     print(f"Classement POC : {n_poc} chaînes ({sans_degats} vidéos sans dégâts lisibles)")
     print(f"Classement BOT : {n_bot} chaînes ({sans_chrono} vidéos sans chrono lisible)")
     print(f"Classement Boss de Guilde : {n_gb} chaînes ({sans_rc} vidéos sans RC lisible)")
