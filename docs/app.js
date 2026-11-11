@@ -6,7 +6,7 @@
     bot: {
       title: 'Battlefield of Time', file: 'data/classement_bot.csv',
       total: ['chrono_s', 'chrono'], t1: [], t2: [],
-      better: 'low', kpiRecord: 'Meilleur chrono', totalHeader: 'Chrono',
+      better: 'low', kpiRecord: 'Meilleur chrono', totalHeader: 'Chrono', el1: [], el2: [], deg: [], showPct: true,
       fmt: (v) => nf3.format(v) + ' s',
       note: 'Chrono de la phase 3 : le plus court est en tête. L’écart est mesuré par rapport au meilleur chrono de la semaine.',
     },
@@ -14,6 +14,7 @@
       title: 'Boss de Guilde', file: 'data/classement_gb.csv',
       total: ['rc_total', 'total_rc', 'total'], t1: ['rc_equipe_1', 'equipe_1'], t2: ['rc_equipe_2', 'equipe_2'],
       better: 'high', kpiRecord: 'Record de Rage Count', totalHeader: 'Total RC',
+      el1: ['element_equipe_1'], el2: ['element_equipe_2'], deg: ['degats_total_t', 'degats_total'], showPct: false,
       fmt: (v) => nf0.format(v),
       unit: 'RC',
       note: 'Total de Rage Count (RC) des équipes montrées dans la vidéo. À égalité de RC, les dégâts totaux départagent, puis la vidéo publiée en premier.',
@@ -22,6 +23,7 @@
       title: 'Puissance de Calamité', file: 'data/classement_poc.csv',
       total: ['total_t', 'total'], t1: ['equipe_1_t', 'equipe_1'], t2: ['equipe_2_t', 'equipe_2'],
       better: 'high', kpiRecord: 'Record de dégâts', totalHeader: 'Dégâts',
+      el1: ['element_equipe_1'], el2: ['element_equipe_2'], deg: [], showPct: false,
       fmt: (v) => nfT.format(v) + ' T',
       note: 'Dégâts en T (1 T = mille milliards, soit 10¹²). Quand deux équipes sont montrées, le total des deux sert au classement.',
     },
@@ -99,6 +101,9 @@
       chaine: (r.chaine || '').trim(),
       t1: num(pick(r, cfg.t1)),
       t2: num(pick(r, cfg.t2)),
+      e1: pick(r, cfg.el1).toLowerCase(),
+      e2: pick(r, cfg.el2).toLowerCase(),
+      deg: num(pick(r, cfg.deg)),
       total: num(pick(r, cfg.total)),
       source: (r.lu_dans || '').trim(),
       titre: (r.titre_video || '').trim(),
@@ -153,6 +158,7 @@
   function fmtDateLong(d) {
     return d && !isNaN(d) ? d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Paris' }) : '';
   }
+  const teamTxt = (cfg, v, el) => v == null ? '—' : (el ? el.charAt(0).toUpperCase() + el.slice(1) + ' : ' : '') + cfg.fmt(v);
   function chip(rank) {
     return h('span', { class: 'chip' + (rank >= 1 && rank <= 3 ? ' r' + rank : ''), text: rank != null ? String(rank) : '–' });
   }
@@ -189,14 +195,15 @@
 
   function renderTable(mode, rows, met, showTeams) {
     const cfg = MODES[mode];
+    const showDeg = cfg.deg.length > 0 && rows.some((r) => r.deg != null);
     const head = h('tr', null,
       h('th', { scope: 'col', class: 'rank', text: 'Rang' }),
       h('th', { scope: 'col', text: 'Chaîne' }),
-      showTeams ? h('th', { scope: 'col', class: 'num', text: 'Équipe 1' }) : null,
-      showTeams ? h('th', { scope: 'col', class: 'num', text: 'Équipe 2' }) : null,
+      showTeams ? h('th', { scope: 'col', class: 'num', text: 'Équipe (élément)' }) : null,
+      showTeams ? h('th', { scope: 'col', class: 'num', text: 'Équipe (élément)' }) : null,
       h('th', { scope: 'col', class: 'num', text: cfg.totalHeader }),
-      h('th', { scope: 'col', class: 'num', text: cfg.better === 'low' ? 'Écart au 1er' : '% du 1er' }),
-      h('th', { scope: 'col', text: 'Chiffre lu dans' }),
+      showDeg ? h('th', { scope: 'col', class: 'num', text: 'Dégâts' }) : null,
+      cfg.showPct ? h('th', { scope: 'col', class: 'num', text: 'Écart au 1er' }) : null,
       h('th', { scope: 'col', text: 'Vidéo' }),
       h('th', { scope: 'col', text: 'Date' }),
       h('th', { scope: 'col', text: 'Lien' }),
@@ -208,13 +215,11 @@
       body.append(h('tr', null,
         h('td', { class: 'rank' }, chip(r.rang)),
         h('th', { scope: 'row', class: 'channel', text: r.chaine, style: 'font-weight:650' }),
-        showTeams ? h('td', { class: 'num', text: r.t1 != null ? cfg.fmt(r.t1) : '—' }) : null,
-        showTeams ? h('td', { class: 'num', text: r.t2 != null ? cfg.fmt(r.t2) : '—' }) : null,
+        showTeams ? h('td', { class: 'num', text: teamTxt(cfg, r.t1, r.e1) }) : null,
+        showTeams ? h('td', { class: 'num', text: teamTxt(cfg, r.t2, r.e2) }) : null,
         h('td', { class: 'num total', text: r.total != null ? cfg.fmt(r.total) : '—' }),
-        h('td', { class: 'level' },
-          h('span', { class: 'pct', text: pctTxt }),
-          (m.pct != null && cfg.better !== 'low') ? h('div', { class: 'bar', 'aria-hidden': 'true' }, h('span', { style: 'width:' + Math.max(2, Math.round(m.pct * 100)) + '%' })) : null),
-        h('td', null, h('span', { class: 'src', text: sourceLabel(r.source) })),
+        showDeg ? h('td', { class: 'num', text: r.deg != null ? nfT.format(r.deg) + ' T' : '—' }) : null,
+        cfg.showPct ? h('td', { class: 'level' }, h('span', { class: 'pct', text: pctTxt })) : null,
         h('td', null, h('span', { class: 'video-title', title: r.titre, text: r.titre || '—' })),
         h('td', { class: 'date' }, r.date && !isNaN(r.date) ? h('time', { datetime: r.date.toISOString(), text: fmtDate(r.date) }) : '—'),
         h('td', null, r.url ? h('a', { class: 'btn', href: r.url, target: '_blank', rel: 'noopener noreferrer', 'aria-label': 'Voir la vidéo de ' + r.chaine + ' (nouvel onglet)' }, '▶ Voir') : '—'),
@@ -231,11 +236,11 @@
       const pctTxt = m.pct == null ? '' : (cfg.better === 'low' ? (m.gap > 0 ? '+' + nf3.format(m.gap) + ' s' : 'record') : nfPct.format(m.pct));
       return h('li', { class: 'card' },
         h('div', { class: 'card-head' }, chip(r.rang), h('span', { class: 'channel', text: r.chaine }), h('span', { class: 'total', text: r.total != null ? cfg.fmt(r.total) : '—' })),
-        (r.t1 != null && r.t2 != null) ? h('p', { class: 'card-teams', text: 'Équipe 1 : ' + cfg.fmt(r.t1) + ' · Équipe 2 : ' + cfg.fmt(r.t2) }) : null,
-        (m.pct != null && cfg.better !== 'low') ? h('div', { class: 'card-level' }, h('div', { class: 'bar', 'aria-hidden': 'true' }, h('span', { style: 'width:' + Math.max(2, Math.round(m.pct * 100)) + '%' })), h('span', { class: 'pct', text: pctTxt })) : null,
-        (m.pct != null && cfg.better === 'low') ? h('p', { class: 'card-teams', text: pctTxt === 'record' ? 'Meilleur chrono de la semaine' : 'Écart au 1er : ' + pctTxt }) : null,
+        (r.t1 != null && r.t2 != null) ? h('p', { class: 'card-teams', text: teamTxt(cfg, r.t1, r.e1 || '') + ' · ' + teamTxt(cfg, r.t2, r.e2 || '') }) : null,
+        (cfg.deg.length && r.deg != null) ? h('p', { class: 'card-teams', text: 'Dégâts : ' + nfT.format(r.deg) + ' T' }) : null,
+                (m.pct != null && cfg.better === 'low') ? h('p', { class: 'card-teams', text: pctTxt === 'record' ? 'Meilleur chrono de la semaine' : 'Écart au 1er : ' + pctTxt }) : null,
         h('span', { class: 'video-title', title: r.titre, text: r.titre || '—' }),
-        h('div', { class: 'card-meta' }, h('span', { class: 'src', text: sourceLabel(r.source) }), h('span', { class: 'date', text: fmtDate(r.date) })),
+        h('div', { class: 'card-meta' }, h('span', { class: 'date', text: fmtDate(r.date) })),
         r.url ? h('a', { class: 'btn', href: r.url, target: '_blank', rel: 'noopener noreferrer', 'aria-label': 'Voir la vidéo de ' + r.chaine + ' (nouvel onglet)' }, '▶ Voir la vidéo') : null,
       );
     }));
