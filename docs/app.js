@@ -15,6 +15,7 @@
       total: ['rc_total', 'total_rc', 'total'], t1: ['rc_equipe_1', 'equipe_1'], t2: ['rc_equipe_2', 'equipe_2'],
       better: 'high', kpiRecord: 'Record de Rage Count', totalHeader: 'Total RC',
       el1: ['element_equipe_1'], el2: ['element_equipe_2'], deg: ['degats_total_t', 'degats_total'], showPct: false,
+      cols: [{ key: 'vent', label: 'Équipe (vent)' }, { key: 'feu', label: 'Équipe (feu)' }],
       fmt: (v) => nf0.format(v),
       unit: 'RC',
       note: 'Total de Rage Count (RC) des équipes montrées dans la vidéo. À égalité de RC, les dégâts totaux départagent, puis la vidéo publiée en premier.',
@@ -24,6 +25,7 @@
       total: ['total_t', 'total'], t1: ['equipe_1_t', 'equipe_1'], t2: ['equipe_2_t', 'equipe_2'],
       better: 'high', kpiRecord: 'Record de dégâts', totalHeader: 'Dégâts',
       el1: ['element_equipe_1'], el2: ['element_equipe_2'], deg: [], showPct: false,
+      cols: [{ key: 'feu', label: 'Équipe (feu)' }, { key: 'eau', label: 'Équipe (eau)' }],
       fmt: (v) => nfT.format(v) + ' T',
       note: 'Dégâts en T (1 T = mille milliards, soit 10¹²). Quand deux équipes sont montrées, le total des deux sert au classement.',
     },
@@ -158,7 +160,18 @@
   function fmtDateLong(d) {
     return d && !isNaN(d) ? d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Paris' }) : '';
   }
-  const teamTxt = (cfg, v, el) => v == null ? '—' : (el ? el.charAt(0).toUpperCase() + el.slice(1) + ' : ' : '') + cfg.fmt(v);
+  const ELT = { feu: 'feu', fire: 'feu', vent: 'vent', wind: 'vent', eau: 'eau', water: 'eau' };
+  /* Une valeur par colonne d'élément. Sans élément connu, l'équipe prend la première colonne libre. */
+  function slotValues(cfg, r) {
+    const out = cfg.cols.map(() => null);
+    [[r.t1, r.e1], [r.t2, r.e2]].forEach(([v, e]) => {
+      if (v == null) return;
+      let k = cfg.cols.findIndex((c) => c.key === ELT[e]);
+      if (k < 0 || out[k] != null) k = out.findIndex((x) => x == null);
+      if (k >= 0) out[k] = v;
+    });
+    return out;
+  }
   function chip(rank) {
     return h('span', { class: 'chip' + (rank >= 1 && rank <= 3 ? ' r' + rank : ''), text: rank != null ? String(rank) : '–' });
   }
@@ -199,8 +212,7 @@
     const head = h('tr', null,
       h('th', { scope: 'col', class: 'rank', text: 'Rang' }),
       h('th', { scope: 'col', text: 'Chaîne' }),
-      showTeams ? h('th', { scope: 'col', class: 'num', text: 'Équipe (élément)' }) : null,
-      showTeams ? h('th', { scope: 'col', class: 'num', text: 'Équipe (élément)' }) : null,
+      ...(showTeams ? cfg.cols.map((c) => h('th', { scope: 'col', class: 'num', text: c.label })) : []),
       h('th', { scope: 'col', class: 'num', text: cfg.totalHeader }),
       showDeg ? h('th', { scope: 'col', class: 'num', text: 'Dégâts' }) : null,
       cfg.showPct ? h('th', { scope: 'col', class: 'num', text: 'Écart au 1er' }) : null,
@@ -215,8 +227,7 @@
       body.append(h('tr', null,
         h('td', { class: 'rank' }, chip(r.rang)),
         h('th', { scope: 'row', class: 'channel', text: r.chaine, style: 'font-weight:650' }),
-        showTeams ? h('td', { class: 'num', text: teamTxt(cfg, r.t1, r.e1) }) : null,
-        showTeams ? h('td', { class: 'num', text: teamTxt(cfg, r.t2, r.e2) }) : null,
+        ...(showTeams ? slotValues(cfg, r).map((v) => h('td', { class: 'num', text: v != null ? cfg.fmt(v) : '—' })) : []),
         h('td', { class: 'num total', text: r.total != null ? cfg.fmt(r.total) : '—' }),
         showDeg ? h('td', { class: 'num', text: r.deg != null ? nfT.format(r.deg) + ' T' : '—' }) : null,
         cfg.showPct ? h('td', { class: 'level' }, h('span', { class: 'pct', text: pctTxt })) : null,
@@ -236,7 +247,7 @@
       const pctTxt = m.pct == null ? '' : (cfg.better === 'low' ? (m.gap > 0 ? '+' + nf3.format(m.gap) + ' s' : 'record') : nfPct.format(m.pct));
       return h('li', { class: 'card' },
         h('div', { class: 'card-head' }, chip(r.rang), h('span', { class: 'channel', text: r.chaine }), h('span', { class: 'total', text: r.total != null ? cfg.fmt(r.total) : '—' })),
-        (r.t1 != null && r.t2 != null) ? h('p', { class: 'card-teams', text: teamTxt(cfg, r.t1, r.e1 || '') + ' · ' + teamTxt(cfg, r.t2, r.e2 || '') }) : null,
+        (r.t1 != null || r.t2 != null) ? h('p', { class: 'card-teams', text: slotValues(cfg, r).map((v, i) => v != null ? cfg.cols[i].label.replace('Équipe ', '') + ' ' + cfg.fmt(v) : null).filter(Boolean).join(' · ') }) : null,
         (cfg.deg.length && r.deg != null) ? h('p', { class: 'card-teams', text: 'Dégâts : ' + nfT.format(r.deg) + ' T' }) : null,
                 (m.pct != null && cfg.better === 'low') ? h('p', { class: 'card-teams', text: pctTxt === 'record' ? 'Meilleur chrono de la semaine' : 'Écart au 1er : ' + pctTxt }) : null,
         h('span', { class: 'video-title', title: r.titre, text: r.titre || '—' }),
