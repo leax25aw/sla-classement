@@ -322,6 +322,24 @@
   $('q').addEventListener('input', (e) => { query = e.target.value; render(); });
   window.addEventListener('hashchange', () => { const m = location.hash.slice(1); if (MODES[m] && m !== current) select(m); });
 
+  /* Bouton de thème : clair ou sombre. Sans choix du visiteur, on suit le réglage de son appareil. */
+  const root = document.documentElement;
+  const themeBtn = $('theme');
+  const systemDark = () => !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const theme = () => root.getAttribute('data-theme') || (systemDark() ? 'dark' : 'light');
+  const paintTheme = () => {
+    const dark = theme() === 'dark';
+    themeBtn.textContent = dark ? '☀ Thème clair' : '☾ Thème sombre';
+    themeBtn.setAttribute('aria-label', dark ? 'Passer au thème clair' : 'Passer au thème sombre');
+  };
+  themeBtn.addEventListener('click', () => {
+    const next = theme() === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', next);
+    try { localStorage.setItem('sla-theme', next); } catch (e) { /* stockage indisponible : le choix n'est pas gardé */ }
+    paintTheme();
+  });
+  paintTheme();
+
   const start = location.hash.slice(1);
   if (MODES[start]) current = start;
   select(current);

@@ -18,8 +18,9 @@
   --radius: 12px;
   --shadow: 0 1px 2px rgb(20 22 30 / 6%), 0 1px 8px rgb(20 22 30 / 4%);
 }
+/* Thème sombre : automatique (réglage de l'appareil) tant que le visiteur n'a pas choisi, sinon son choix */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #0e1016;
     --surface: #171a24;
     --surface-2: #1f2330;
@@ -33,6 +34,21 @@
     --shadow: 0 0 #0000;
   }
 }
+:root[data-theme="dark"] {
+  --bg: #0e1016;
+  --surface: #171a24;
+  --surface-2: #1f2330;
+  --text: #eceef6;
+  --muted: #a3aabe;
+  --line: #2b3040;
+  --focus: #8fb0ff;
+  --bot: #86a9ff;
+  --gb: #ff8c93;
+  --poc: #bc9fff;
+  --shadow: 0 0 #0000;
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
 [data-mode="bot"] { --accent: var(--bot); }
 [data-mode="gb"]  { --accent: var(--gb); }
 [data-mode="poc"] { --accent: var(--poc); }
@@ -54,6 +70,10 @@ a { color: inherit; }
 
 /* En-tête */
 .top { padding: 28px 0 8px; }
+.top-row { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 16px; }
+.top-text { flex: 1 1 320px; min-width: 0; }
+.theme-btn { flex: 0 0 auto; min-height: 44px; padding: 8px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--text); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.theme-btn:hover { background: var(--surface-2); }
 .eyebrow { margin: 0 0 4px; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 h1 { margin: 0 0 8px; font-size: clamp(26px, 5vw, 36px); line-height: 1.15; letter-spacing: -.01em; }
 .meta { margin: 0; color: var(--muted); font-size: 14px; }
@@ -177,6 +197,7 @@ th.num { text-align: right; }
   .tab-full { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .tab-short { display: inline; }
   .top { padding-top: 20px; }
+  .theme-btn { order: -1; margin-left: auto; min-height: 40px; }
 }
 @media (max-width: 340px) {
   .kpis { grid-template-columns: 1fr; }
