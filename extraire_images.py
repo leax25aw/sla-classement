@@ -24,6 +24,16 @@ Utilisation, dans le dossier SLA, après avoir lancé sla_youtube.py :
     py extraire_images.py --refaire    # refait aussi les vidéos déjà extraites
     py extraire_images.py --ajouter    # garde le contenu de a_envoyer et le complète
 
+3e PASSE AUTOMATIQUE : une vidéo dont la 2e passe (10 s au début et à la fin) n'a
+montré aucun score (ligne rendue par Claude avec passe = 2 et valeur vide, statut
+« à revoir sur toute la vidéo » dans a_revoir.csv) est reprise AUTOMATIQUEMENT, au
+lancement suivant de py extraire_images.py, avec la méthode --toute ci-dessous :
+images sur toute la vidéo. Claude rend alors passe = 3 (la colonne passe_a_rendre
+de liste.csv le dit pour chaque vidéo). Valeur vide en passe 3 = définitif : la
+vidéo n'est plus reprise. Chaque vidéo traitée ainsi donne en général plusieurs
+planches (environ 1 par minute de vidéo) : compter ce coût avant de lancer, et
+utiliser --max pour limiter le nombre de vidéos.
+
 Option --toute (avec --video et --mode, ou --fichier) : pour les vidéos dont le
 score peut apparaître à n'importe quel moment (titre annonçant deux éléments,
 écran de résultat absent du début et de la fin). Le script télécharge TOUTE la
@@ -43,7 +53,8 @@ envoyer à Claude pour ce lancement : les planches (nommées
 <id_video>_<mode>_planche_01.jpg, donc impossibles à confondre) et liste.csv
 (quoi chercher et dans quel ordre sont les images de chaque planche). Envoie à
 Claude TOUT le contenu de ce dossier : il rend un fichier d'ajout
-resultats_claude_ajout.csv avec la colonne passe = 2.
+resultats_claude_ajout.csv avec la colonne passe indiquée dans la colonne
+passe_a_rendre de liste.csv (2 = début et fin, 3 = vidéo entière).
 Au lancement suivant, le contenu précédent de « a_envoyer » est rangé dans
 images_a_revoir\\archives\\<date>\\ (--ajouter pour le garder et compléter).
 Les planches restent aussi dans images_a_revoir\\<id_video>\\.
@@ -290,21 +301,27 @@ def videos_a_revoir(video_ids=None, mode=None):
             if r is None:
                 print(f"Vidéo {vid} inconnue de {DB} : lance sla_youtube.py puis réessaie.")
                 continue
-            groupes[vid] = {"modes": [mode], "chaine": r[1], "titre": r[2], "duree": r[3]}
+            groupes[vid] = {"vid": vid, "modes": [mode], "chaine": r[1], "titre": r[2],
+                            "duree": r[3], "toute": False}
         return groupes
+    # Vidéos sans valeur lue : passe < 2 = miniature seulement -> 10 s au début et à la
+    # fin ; passe 2 = ces 10 s n'ont rien donné -> images sur TOUTE la vidéo (passe 3).
+    # Passe 3 sans valeur = définitif : plus jamais reprise.
     try:
         lignes = db.execute(
-            "SELECT v.video_id, v.mode, i.channel, i.title, i.duration_s "
+            "SELECT v.video_id, v.mode, i.channel, i.title, i.duration_s, COALESCE(v.passe, 1) "
             "FROM valeurs_claude v JOIN videos i ON i.id = v.video_id "
-            "WHERE v.valeur IS NULL AND COALESCE(v.passe, 1) < 2 "
+            "WHERE v.valeur IS NULL AND v.total IS NULL AND COALESCE(v.passe, 1) < 3 "
             "ORDER BY i.published DESC").fetchall()
     except sqlite3.OperationalError:
         sys.exit("Mets d'abord à jour sla_youtube.py et relance-le une fois.")
-    for vid, mode_v, chaine, titre, duree in lignes:
+    for vid, mode_v, chaine, titre, duree, passe in lignes:
         if video_ids and vid not in video_ids:
             continue
-        g = groupes.setdefault(vid, {"modes": [], "chaine": chaine, "titre": titre,
-                                     "duree": duree})
+        toute = passe >= 2
+        cle = f"{vid}_toute" if toute else vid  # une même vidéo peut avoir les deux cas
+        g = groupes.setdefault(cle, {"vid": vid, "modes": [], "chaine": chaine, "titre": titre,
+                                     "duree": duree, "toute": toute})
         g["modes"].append(mode_v)
     return groupes
 
@@ -329,12 +346,15 @@ def ecrire_liste(lignes):
         w = csv.writer(f, delimiter=";")
         if nouveau:
             w.writerow(["id_video", "mode", "quoi_chercher", "chaine", "titre",
-                        "dossier_images", "nb_planches", "ordre_des_images"])
+                        "dossier_images", "nb_planches", "ordre_des_images",
+                        "passe_a_rendre"])
         w.writerows(lignes)
 
 
-def traiter(vid, modes, fichiers, reglages, sortie, envoi=None, suffixe=""):
-    """Une planche par jeu de réglages distinct (3 modes identiques = 1 seul jeu)."""
+def traiter(vid, modes, fichiers, reglages, sortie, envoi=None, suffixe="", passe=2):
+    """Une planche par jeu de réglages distinct (3 modes identiques = 1 seul jeu).
+    passe = valeur de la colonne « passe » que Claude doit rendre (2 = début et fin,
+    3 = vidéo entière), écrite dans liste.csv."""
     sortie.mkdir(parents=True, exist_ok=True)
     deja, lignes = {}, []
     for mode in modes:
@@ -354,7 +374,8 @@ def traiter(vid, modes, fichiers, reglages, sortie, envoi=None, suffixe=""):
             deja[cle] = (planches, ordre)
         planches, ordre = deja[cle]
         lignes.append([vid, mode, QUOI[mode], "", "",
-                       str(envoi if envoi is not None else sortie), len(planches), ordre])
+                       str(envoi if envoi is not None else sortie), len(planches), ordre,
+                       passe])
     return lignes
 
 
@@ -393,7 +414,7 @@ def main():
             reglages, _ = reglages_toute(reglages, [a.mode], d, a.pas, a.max_images)
             suffixe = "_toute"
         lignes = traiter("test", [a.mode], {"tout": Path(a.fichier)}, reglages, sortie,
-                         suffixe=suffixe)
+                         suffixe=suffixe, passe=3 if a.toute else 2)
         print(f"{lignes[0][6]} planches dans {sortie}")
         print(lignes[0][7])
         return
@@ -407,20 +428,23 @@ def main():
     DOSSIER.mkdir(exist_ok=True)
     traitees = 0
     envoi_pret = False  # a_envoyer n'est vidé qu'à la 1re vidéo réellement traitée
-    for vid, g in groupes.items():
+    for g in groupes.values():
+        vid = g["vid"]
+        toute = a.toute or g["toute"]  # --toute à la main, ou 3e passe automatique
         if traitees >= a.max:
             print(f"Limite de {a.max} vidéos atteinte, relance pour continuer.")
             break
-        sortie = DOSSIER / (f"{vid}_toute" if a.toute else vid)  # dossier à part pour --toute
+        sortie = DOSSIER / (f"{vid}_toute" if toute else vid)  # dossier à part pour --toute
         if sortie.exists() and any(sortie.glob("*.jpg")) and not a.refaire:
             continue
-        print(f"[{traitees + 1}] {g['chaine']} — {g['titre'][:60]}")
+        print(f"[{traitees + 1}] {g['chaine']} — {g['titre'][:60]}"
+              + ("  (3e passe : toute la vidéo)" if toute else ""))
         tmp = DOSSIER / f"_tmp_{vid}"
         try:
             fichiers = telecharger(vid, [reglages[m] for m in g["modes"]],
-                                   g["duree"], reglages, tmp, toute=a.toute)
+                                   g["duree"], reglages, tmp, toute=toute)
             reglages_v, suffixe = reglages, ""
-            if a.toute:
+            if toute:
                 d = duree_fichier(fichiers["tout"]) or g["duree"]
                 if not d:
                     raise RuntimeError("durée de la vidéo introuvable")
@@ -433,7 +457,7 @@ def main():
                 preparer_envoi(a.ajouter)
                 envoi_pret = True
             lignes = traiter(vid, g["modes"], fichiers, reglages_v, sortie, ENVOI,
-                             suffixe=suffixe)
+                             suffixe=suffixe, passe=3 if toute else 2)
             for l in lignes:
                 l[3], l[4] = g["chaine"], g["titre"]
                 print(f"    {l[1]} : {l[6]} planche(s)")

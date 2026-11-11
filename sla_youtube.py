@@ -34,7 +34,9 @@ resultats_importes. Inutile de redonner le fichier complet à Claude.
 Vidéos illisibles sur miniature (valeur vide) : rangées à part, toutes semaines
 confondues, dans a_revoir.csv, en attente d'une identification en regardant la
 vidéo. Le résultat de cette 2e passe se donne dans resultats_claude.csv avec la
-colonne facultative « passe » = 2 (valeur vide = illisible aussi en vidéo).
+colonne facultative « passe » = 2 (10 s au début et à la fin). Si elle ne donne rien
+(valeur vide), la vidéo passe en 3e passe : images sur TOUTE la vidéo (passe = 3).
+Une valeur vide en passe 3 = illisible aussi sur toute la vidéo (définitif).
 """
 import argparse
 import json
@@ -494,7 +496,8 @@ def importer_fichier_claude(db, chemin):
     Colonnes facultatives :
       valeur2 : score de la 2e équipe, si la vidéo en montre deux (POC, Boss de Guilde)
       total   : total des deux équipes (sinon calculé : valeur + valeur2)
-      passe   : 1 = miniature (défaut), 2 = vidéo regardée.
+      passe   : 1 = miniature (défaut), 2 = vidéo regardée (début et fin),
+                3 = vidéo regardée en entier (--toute ; valeur vide = définitif).
       degats  : dégâts totaux en T (Boss de Guilde), pour départager des égalités de RC."""
     if not os.path.exists(chemin):
         return 0
@@ -517,17 +520,22 @@ def importer_fichier_claude(db, chemin):
         if total is None and (valeur is not None or valeur2 is not None):
             total = somme(valeur, valeur2)
         try:
-            passe = 2 if int((r.get("passe") or 1)) >= 2 else 1
+            passe = min(3, max(1, int((r.get("passe") or 1))))
         except ValueError:
             passe = 1
-        ancien = db.execute("SELECT passe, degats FROM valeurs_claude WHERE video_id=? AND mode=?",
-                            (vid, mode)).fetchone()
+        ancien = db.execute("SELECT passe, degats, valeur, total FROM valeurs_claude "
+                            "WHERE video_id=? AND mode=?", (vid, mode)).fetchone()
         if degats is None and ancien:
             degats = ancien[1]  # une ligne sans dégâts n'efface pas ceux déjà connus
-        if ancien and (ancien[0] or 1) >= 2 and passe < 2:
-            print(f"  {vid} ({mode}) : ligne de la miniature ignorée, "
-                  "la valeur lue en vidéo est gardée.")
-            continue
+        # Une lecture d'une passe plus ancienne n'écrase pas une passe plus récente. Seule
+        # exception : une valeur lue peut remplacer une ancienne lecture restée vide.
+        if ancien and (ancien[0] or 1) > passe:
+            ancien_vide = ancien[2] is None and ancien[3] is None
+            ligne_vide = valeur is None and total is None
+            if ligne_vide or not ancien_vide:
+                print(f"  {vid} ({mode}) : ligne de la passe {passe} ignorée, "
+                      f"la lecture de la passe {ancien[0] or 1} est gardée.")
+                continue
         db.execute("INSERT OR REPLACE INTO valeurs_claude "
                    "(video_id, mode, valeur, remarque, passe, valeur2, total, degats) "
                    "VALUES (?,?,?,?,?,?,?,?)",
@@ -569,9 +577,10 @@ def importer_resultats_claude(db, dossier="."):
 def exporter_a_revoir(db, chemin="a_revoir.csv"):
     """Range à part, dans a_revoir.csv, toutes les vidéos que la miniature n'a
     pas permis d'identifier (toutes semaines confondues, rien n'est effacé).
-    Elles attendent une identification en regardant la vidéo (passe 2).
+    Elles attendent une identification en regardant la vidéo (passe 2), puis, si les
+    10 s du début et de la fin n'ont rien donné, sur TOUTE la vidéo (passe 3).
     Une vidéo en sort dès qu'une valeur est donnée dans resultats_claude.csv ;
-    si la passe 2 ne donne rien non plus, elle reste listée comme définitive."""
+    si la passe 3 ne donne rien non plus, elle reste listée comme définitive."""
     quoi = {"bot": "chrono en secondes",
             "gb": "Rage Count (RC) : équipe 1, équipe 2 si les deux, total",
             "poc": "dégâts en T (billions) : équipe 1, équipe 2 si les deux, total"}
@@ -581,8 +590,12 @@ def exporter_a_revoir(db, chemin="a_revoir.csv"):
             "v.remarque FROM valeurs_claude v JOIN videos i ON i.id = v.video_id "
             "WHERE v.valeur IS NULL AND v.total IS NULL "
             "ORDER BY v.passe, i.published DESC"):
-        statut = ("à revoir en regardant la vidéo" if (passe or 1) < 2
-                  else "illisible aussi en vidéo (définitif)")
+        if (passe or 1) < 2:
+            statut = "à revoir en regardant la vidéo"
+        elif passe == 2:
+            statut = "à revoir sur toute la vidéo"
+        else:
+            statut = "illisible aussi sur toute la vidéo (définitif)"
         lignes.append([vid, mode, quoi.get(mode, ""), statut, chaine, titre, pub,
                        f"https://www.youtube.com/watch?v={vid}", rem or ""])
     ecrire_csv(chemin, ["id_video", "mode", "quoi_chercher", "statut", "chaine",
