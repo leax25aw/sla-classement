@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Classement des youtubeurs · Solo Leveling: ARISE</title>
+<meta name="description" content="Classement hebdomadaire des chaînes YouTube de Solo Leveling: ARISE : Battlefield of Time, Boss de Guilde et Puissance de Calamité.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8F%86%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<a class="skip" href="#panel">Aller au classement</a>
+
+<header class="top">
+  <div class="wrap">
+    <p class="eyebrow">Solo Leveling: ARISE · classement hebdomadaire</p>
+    <h1>Classement des youtubeurs</h1>
+    <p class="meta" id="week">&nbsp;</p>
+    <p class="meta" id="updated"></p>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="tabs" role="tablist" aria-label="Mode de jeu" id="tabs">
+    <button class="tab" role="tab" id="tab-bot" data-mode="bot" aria-controls="panel" aria-selected="true" tabindex="0">
+      <span class="tab-name"><span class="tab-full">Battlefield of Time</span><span class="tab-short" aria-hidden="true">BOT</span></span><span class="tab-count" id="count-bot">…</span>
+    </button>
+    <button class="tab" role="tab" id="tab-gb" data-mode="gb" aria-controls="panel" aria-selected="false" tabindex="-1">
+      <span class="tab-name"><span class="tab-full">Boss de Guilde</span><span class="tab-short" aria-hidden="true">Guilde</span></span><span class="tab-count" id="count-gb">…</span>
+    </button>
+    <button class="tab" role="tab" id="tab-poc" data-mode="poc" aria-controls="panel" aria-selected="false" tabindex="-1">
+      <span class="tab-name"><span class="tab-full">Puissance de Calamité</span><span class="tab-short" aria-hidden="true">POC</span></span><span class="tab-count" id="count-poc">…</span>
+    </button>
+  </div>
+</div>
+
+<main class="wrap" id="panel" role="tabpanel" aria-labelledby="tab-bot" data-mode="bot" tabindex="-1">
+  <section class="kpis" id="kpis" aria-label="Chiffres clés"></section>
+
+  <div class="toolbar" id="toolbar">
+    <div class="search">
+      <label for="q" class="sr-only">Rechercher une chaîne</label>
+      <input id="q" type="search" placeholder="Rechercher une chaîne" autocomplete="off" spellcheck="false">
+    </div>
+    <p class="count" id="count" role="status" aria-live="polite"></p>
+  </div>
+
+  <div id="results"></div>
+  <p class="note" id="note"></p>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <p>Classement non officiel, mis à jour chaque semaine. La semaine commence le jeudi à 01h (heure de Paris) et le classement repart de zéro. Chaque chaîne n’apparaît qu’avec sa meilleure vidéo de la semaine.</p>
+    <p>Les chiffres sont lus dans les titres et descriptions des vidéos, ou sur leurs images quand ils n’y sont pas écrits. <a href="https://github.com/leax25aw/sla-classement">Code du projet</a></p>
+  </div>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
