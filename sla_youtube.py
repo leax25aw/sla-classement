@@ -407,6 +407,30 @@ def somme(e1, e2):
     return None if e1 is None and e2 is None else (e1 or 0) + (e2 or 0)
 
 
+ELEMENTS = {
+    "feu": r"(?i)\b(?:fire|feu)\b|🔥",
+    "vent": r"(?i)\b(?:wind|vent)\b|🍃|🌪",
+    "eau": r"(?i)\b(?:water|eau)\b|💧",
+    "lumiere": r"(?i)\b(?:light|lumi[èe]re)\b",
+    "tenebres": r"(?i)\b(?:dark|t[ée]n[èe]bres)\b",
+}
+
+
+def nombre_de_rc(titre):
+    """Combien de RC différents le titre écrit-il (ex. « 150 RC ... 160 RC » : 2) ?"""
+    nombres = set(re.findall(r"(?i)(?<![\w.])(\d{2,3})\s*(?:rc\b|rage count|iras\b)", titre))
+    nombres |= set(re.findall(r"(?i)\b(?:rc|rage count)\s*[:=]?\s*(\d{2,3})\b", titre))
+    return len({n for n in nombres if 50 <= int(n) <= 500})
+
+
+def deux_elements(titre):
+    """Vrai si le titre cite au moins deux éléments (ex. « Fire - Wind - RC: 348 ») et
+    un seul RC. Ce chiffre est alors le total des deux équipes, pas le RC d'une seule
+    run : on ne le met pas en équipe 1. Avec deux RC dans le titre, rien ne change."""
+    return (sum(1 for motif in ELEMENTS.values() if re.search(motif, titre)) >= 2
+            and nombre_de_rc(titre) == 1)
+
+
 def lire_valeurs(titre, desc, liste, vid=None, claude=None):
     """Valeurs de chaque mode pour une vidéo. Renvoie un dict
     {mode: (equipe_1, equipe_2, total, source)} avec source = titre /
@@ -439,7 +463,10 @@ def lire_valeurs(titre, desc, liste, vid=None, claude=None):
             out["gb"] = (deux[0], deux[1], deux[0] + deux[1],
                          "titre" if rc_deux_equipes(titre) else "description")
         elif r is not None:
-            out["gb"] = (r[0], None, r[0], r[1])
+            if deux_elements(titre):  # ex. « Fire - Wind - RC: 348 » : total des deux équipes
+                out["gb"] = (None, None, r[0], r[1])
+            else:
+                out["gb"] = (r[0], None, r[0], r[1])
         else:
             v = rc_description(desc)
             if v is not None:
