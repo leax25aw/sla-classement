@@ -23,7 +23,7 @@
       total: ['total_t', 'total'], t1: ['equipe_1_t', 'equipe_1'], t2: ['equipe_2_t', 'equipe_2'],
       better: 'high', kpiRecord: 'Record de dégâts', totalHeader: 'Dégâts',
       fmt: (v) => nfT.format(v) + ' T',
-      note: 'Dégâts en T (trillions : 1 T = 1 000 milliards). Quand deux équipes sont montrées, le total des deux sert au classement.',
+      note: 'Dégâts en T (1 T = mille milliards, soit 10¹²). Quand deux équipes sont montrées, le total des deux sert au classement.',
     },
   };
   const ORDER = ['bot', 'gb', 'poc'];
@@ -213,7 +213,7 @@
         h('td', { class: 'num total', text: r.total != null ? cfg.fmt(r.total) : '—' }),
         h('td', { class: 'level' },
           h('span', { class: 'pct', text: pctTxt }),
-          m.pct != null ? h('div', { class: 'bar', 'aria-hidden': 'true' }, h('span', { style: 'width:' + Math.max(2, Math.round(m.pct * 100)) + '%' })) : null),
+          (m.pct != null && cfg.better !== 'low') ? h('div', { class: 'bar', 'aria-hidden': 'true' }, h('span', { style: 'width:' + Math.max(2, Math.round(m.pct * 100)) + '%' })) : null),
         h('td', null, h('span', { class: 'src', text: sourceLabel(r.source) })),
         h('td', null, h('span', { class: 'video-title', title: r.titre, text: r.titre || '—' })),
         h('td', { class: 'date' }, r.date && !isNaN(r.date) ? h('time', { datetime: r.date.toISOString(), text: fmtDate(r.date) }) : '—'),
@@ -232,7 +232,8 @@
       return h('li', { class: 'card' },
         h('div', { class: 'card-head' }, chip(r.rang), h('span', { class: 'channel', text: r.chaine }), h('span', { class: 'total', text: r.total != null ? cfg.fmt(r.total) : '—' })),
         (r.t1 != null && r.t2 != null) ? h('p', { class: 'card-teams', text: 'Équipe 1 : ' + cfg.fmt(r.t1) + ' · Équipe 2 : ' + cfg.fmt(r.t2) }) : null,
-        m.pct != null ? h('div', { class: 'card-level' }, h('div', { class: 'bar', 'aria-hidden': 'true' }, h('span', { style: 'width:' + Math.max(2, Math.round(m.pct * 100)) + '%' })), h('span', { class: 'pct', text: pctTxt })) : null,
+        (m.pct != null && cfg.better !== 'low') ? h('div', { class: 'card-level' }, h('div', { class: 'bar', 'aria-hidden': 'true' }, h('span', { style: 'width:' + Math.max(2, Math.round(m.pct * 100)) + '%' })), h('span', { class: 'pct', text: pctTxt })) : null,
+        (m.pct != null && cfg.better === 'low') ? h('p', { class: 'card-teams', text: pctTxt === 'record' ? 'Meilleur chrono de la semaine' : 'Écart au 1er : ' + pctTxt }) : null,
         h('span', { class: 'video-title', title: r.titre, text: r.titre || '—' }),
         h('div', { class: 'card-meta' }, h('span', { class: 'src', text: sourceLabel(r.source) }), h('span', { class: 'date', text: fmtDate(r.date) })),
         r.url ? h('a', { class: 'btn', href: r.url, target: '_blank', rel: 'noopener noreferrer', 'aria-label': 'Voir la vidéo de ' + r.chaine + ' (nouvel onglet)' }, '▶ Voir la vidéo') : null,

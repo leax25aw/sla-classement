@@ -98,7 +98,7 @@ h1 { margin: 0 0 8px; font-size: clamp(26px, 5vw, 36px); line-height: 1.15; lett
 .table-wrap { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }
 caption { text-align: left; }
-th, td { padding: 12px 14px; text-align: left; vertical-align: middle; border-bottom: 1px solid var(--line); }
+th, td { padding: 12px 10px; text-align: left; vertical-align: middle; border-bottom: 1px solid var(--line); }
 thead th { font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); background: var(--surface-2); white-space: nowrap; }
 tbody tr:last-child td, tbody tr:last-child th { border-bottom: 0; }
 tbody tr:hover { background: var(--accent-soft); }
@@ -112,20 +112,25 @@ th.num { text-align: right; }
 .chip.r1 { background: var(--gold-bg); color: var(--gold-fg); }
 .chip.r2 { background: var(--silver-bg); color: var(--silver-fg); }
 .chip.r3 { background: var(--bronze-bg); color: var(--bronze-fg); }
-.channel { font-weight: 650; overflow-wrap: anywhere; min-width: 140px; }
+.channel { font-weight: 650; overflow-wrap: anywhere; min-width: 120px; }
 .total { font-weight: 700; font-size: 17px; }
-.level { min-width: 150px; }
+.level { min-width: 120px; }
 .level .pct { display: block; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; margin-bottom: 4px; text-align: right; }
 .bar { height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
 .bar > span { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
 .src { display: inline-block; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); font-size: 13px; color: var(--muted); white-space: nowrap; }
-.video-title { min-width: 200px; max-width: 360px; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; font-size: 14px; color: var(--muted); }
+.video-title { min-width: 160px; max-width: 300px; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; font-size: 14px; color: var(--muted); }
 .date { white-space: nowrap; color: var(--muted); font-size: 14px; }
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 8px 16px; border-radius: 10px;
   border: 1.5px solid var(--accent); color: var(--accent); background: transparent; font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; white-space: nowrap;
 }
 .btn:hover { background: var(--accent-soft); }
+/* Dernière colonne (Lien) collée à droite : toujours visible, même si le tableau défile */
+.table-wrap tbody td:last-child, .table-wrap thead th:last-child { position: sticky; right: 0; box-shadow: -10px 0 8px -8px rgb(0 0 0 / 22%); }
+.table-wrap tbody td:last-child { background: var(--surface); }
+.table-wrap thead th:last-child { background: var(--surface-2); }
+.table-wrap tbody tr:hover td:last-child { background: var(--accent-soft); }
 
 /* Cartes (téléphone) */
 .cards { list-style: none; margin: 0; padding: 0; display: none; gap: 12px; }
@@ -164,6 +169,8 @@ th.num { text-align: right; }
 @media (max-width: 640px) {
   .table-wrap { display: none; }
   .cards { display: grid; }
+  .search { flex: 1 1 100%; max-width: none; }
+  .count { flex: 1 1 100%; }
   .kpis { grid-template-columns: 1fr 1fr; }
   .kpi:last-child { grid-column: 1 / -1; }
   .tab { padding: 10px 8px; font-size: 15px; gap: 6px; min-width: 0; }
