@@ -153,6 +153,11 @@ def init_db():
     for col in ("valeur2", "total", "degats"):
         if col not in colonnes:
             db.execute(f"ALTER TABLE valeurs_claude ADD COLUMN {col} REAL")
+    # element1 / element2 = élément de l'équipe 1 / 2 (feu, vent, eau, lumiere, tenebres),
+    # affiché dans les colonnes « Équipe (élément) » de la page web.
+    for col in ("element1", "element2"):
+        if col not in colonnes:
+            db.execute(f"ALTER TABLE valeurs_claude ADD COLUMN {col} TEXT")
     db.commit()
     return db
 
@@ -489,6 +494,17 @@ def lire_valeurs(titre, desc, liste, vid=None, claude=None):
     return out
 
 
+ELEMENTS_NOMS = {"feu": "feu", "fire": "feu", "vent": "vent", "wind": "vent",
+                 "eau": "eau", "water": "eau", "lumiere": "lumiere", "lumière": "lumiere",
+                 "light": "lumiere", "tenebres": "tenebres", "ténèbres": "tenebres",
+                 "dark": "tenebres"}
+
+
+def element_normalise(texte):
+    """feu / vent / eau / lumiere / tenebres (ou vide si non reconnu)."""
+    return ELEMENTS_NOMS.get((texte or "").strip().lower(), "")
+
+
 def importer_fichier_claude(db, chemin):
     """Lit un fichier de résultats de Claude (colonnes : id_video;mode;valeur;remarque),
     rempli par Claude, et l'ajoute à la mémoire du script. Sans effet si le
@@ -498,7 +514,9 @@ def importer_fichier_claude(db, chemin):
       total   : total des deux équipes (sinon calculé : valeur + valeur2)
       passe   : 1 = miniature (défaut), 2 = vidéo regardée (début et fin),
                 3 = vidéo regardée en entier (--toute ; valeur vide = définitif).
-      degats  : dégâts totaux en T (Boss de Guilde), pour départager des égalités de RC."""
+      degats  : dégâts totaux en T (Boss de Guilde), pour départager des égalités de RC.
+      element1, element2 : élément de l'équipe 1 et de l'équipe 2 (feu, vent, eau, lumiere,
+                tenebres ; fire, wind... acceptés), pour la page web."""
     if not os.path.exists(chemin):
         return 0
     with open(chemin, newline="", encoding="utf-8-sig") as f:
@@ -517,16 +535,19 @@ def importer_fichier_claude(db, chemin):
                 return None
         valeur, valeur2, total = nombre("valeur"), nombre("valeur2"), nombre("total")
         degats = nombre("degats")
+        element1, element2 = element_normalise(r.get("element1")), element_normalise(r.get("element2"))
         if total is None and (valeur is not None or valeur2 is not None):
             total = somme(valeur, valeur2)
         try:
             passe = min(3, max(1, int((r.get("passe") or 1))))
         except ValueError:
             passe = 1
-        ancien = db.execute("SELECT passe, degats, valeur, total FROM valeurs_claude "
-                            "WHERE video_id=? AND mode=?", (vid, mode)).fetchone()
+        ancien = db.execute("SELECT passe, degats, valeur, total, element1, element2 "
+                            "FROM valeurs_claude WHERE video_id=? AND mode=?", (vid, mode)).fetchone()
         if degats is None and ancien:
             degats = ancien[1]  # une ligne sans dégâts n'efface pas ceux déjà connus
+        if ancien:  # une ligne sans élément n'efface pas ceux déjà connus
+            element1, element2 = element1 or ancien[4] or "", element2 or ancien[5] or ""
         # Une lecture d'une passe plus ancienne n'écrase pas une passe plus récente. Seule
         # exception : une valeur lue peut remplacer une ancienne lecture restée vide.
         if ancien and (ancien[0] or 1) > passe:
@@ -537,10 +558,10 @@ def importer_fichier_claude(db, chemin):
                       f"la lecture de la passe {ancien[0] or 1} est gardée.")
                 continue
         db.execute("INSERT OR REPLACE INTO valeurs_claude "
-                   "(video_id, mode, valeur, remarque, passe, valeur2, total, degats) "
-                   "VALUES (?,?,?,?,?,?,?,?)",
+                   "(video_id, mode, valeur, remarque, passe, valeur2, total, degats, "
+                   "element1, element2) VALUES (?,?,?,?,?,?,?,?,?,?)",
                    (vid, mode, valeur, (r.get("remarque") or "").strip(), passe,
-                    valeur2, total, degats))
+                    valeur2, total, degats, element1, element2))
         n += 1
     db.commit()
     return n
@@ -648,6 +669,9 @@ def exporter(db, debut_utc, fin_utc, jour):
     degats_gb = {v: d for v, d in db.execute(
         "SELECT video_id, degats FROM valeurs_claude "
         "WHERE mode='gb' AND degats IS NOT NULL")}
+    # Éléments des équipes (page web : colonnes « Équipe (vent) », « Équipe (feu) »...).
+    elements = {(v, m): (e1 or "", e2 or "") for v, m, e1, e2 in db.execute(
+        "SELECT video_id, mode, element1, element2 FROM valeurs_claude")}
     traites = {(v, m) for v, m in db.execute(
         "SELECT video_id, mode FROM valeurs_claude")}
     a_identifier = []
@@ -692,7 +716,7 @@ def exporter(db, debut_utc, fin_utc, jour):
                ["id_video", "mode", "quoi_chercher", "chaine", "titre", "date",
                 "url", "description_debut"], a_identifier)
 
-    def classement(cle, fichier, colonnes):
+    def classement(cle, fichier, colonnes, avec_degats=False):
         """BOT : une colonne (chrono). POC et Boss de Guilde : la même ligne
         donne la vidéo, le score de la 1re équipe, celui de la 2e et le total ;
         le classement est fait sur le total."""
@@ -700,8 +724,18 @@ def exporter(db, debut_utc, fin_utc, jour):
         sortie = []
         for i, (_, d, e1, e2, tot, c, t, u, src) in enumerate(lignes, 1):
             scores = [fm(cle, tot)] if cle == "bot" else [fm(cle, e1), fm(cle, e2), fm(cle, tot)]
+            if cle != "bot":  # éléments des équipes (seulement si lus par Claude), dégâts GB
+                vid = u.split("v=")[-1]
+                e = elements.get((vid, cle), ("", "")) if src == "claude" else ("", "")
+                scores += [e[0], e[1]]
+                if avec_degats:
+                    dg = degats_gb.get(vid) if src == "claude" else None
+                    scores.append(round(dg, 3) if dg is not None else "")
             sortie.append([i, c, *scores, src, t, d, u])
-        ecrire_csv(fichier, ["rang", "chaine", *colonnes, "lu_dans", "titre_video",
+        extra = [] if cle == "bot" else ["element_equipe_1", "element_equipe_2"]
+        if avec_degats:
+            extra.append("degats_total_T")
+        ecrire_csv(fichier, ["rang", "chaine", *colonnes, *extra, "lu_dans", "titre_video",
                              "date", "url"], sortie)
         return len(lignes)
 
@@ -709,7 +743,7 @@ def exporter(db, debut_utc, fin_utc, jour):
                        ["equipe_1_T", "equipe_2_T", "total_T"])
     n_bot = classement("bot", "classement_bot.csv", ["chrono_s"])
     n_gb = classement("gb", "classement_gb.csv",
-                      ["rc_equipe_1", "rc_equipe_2", "rc_total"])
+                      ["rc_equipe_1", "rc_equipe_2", "rc_total"], avec_degats=True)
 
     # --- classement des chaînes par nombre de vidéos (à égalité : plus de vues) ---
     lignes = db.execute(
